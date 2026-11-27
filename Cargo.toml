@@ -64,20 +64,49 @@ min_max = "allow"
 # this fork's newer GPU code still lack one.
 undocumented_unsafe_blocks = "allow"
 
+# ── Profiles (performance-oriented) ──────────────────────────────────
+
+[profile.dev]
+# Light optimization for the workspace's own crates: keeps shader translation
+# and game-data parsing from becoming painfully slow during development.
+opt-level = 1
+debug = "line-tables-only"
+
 [profile.dev.package."*"]
-# Dependencies (hashing, parsing) are hot paths when chewing through
-# gigabytes of game data; keep them fast even in debug builds.
-opt-level = 2
+# Maximize optimization for dependency crates: blake3 hashing, zlib-rs
+# decompression, and object's PE parsing are all hot paths even in dev
+# builds, where opt-level=2 still leaves measurable performance on the table.
+opt-level = 3
 
 [profile.release]
 debug = "line-tables-only"
-lto = "thin"
+# thin -> fat: whole-program cross-crate optimization. Pays off clearly on
+# cross-crate hot paths in the rendering pipeline, at the cost of longer
+# release build times (typically 2-3x). Suited to final builds, not daily
+# iteration.
+lto = "fat"
 codegen-units = 1
+# Explicit declarations (both are defaults; documented here for clarity):
+# The compatibility layer relies on catch_unwind to capture panics from the
+# emulated game, so "abort" must not be used.
+panic = "unwind"
+overflow-checks = false
 
-# The development build: release code generation plus the `diagnostics`
-# feature (`cargo build --profile diag -p victory --features diagnostics`),
-# kept in its own folder so it does not evict the plain release build.
 [profile.diag]
 inherits = "release"
 lto = false
 codegen-units = 16
+# Diagnostic builds need full debug info and symbols for perf / ETW / VTune
+# profiling.
+debug = 2
+strip = "none"
+
+[profile.bench]
+inherits = "release"
+debug = "line-tables-only"
+
+# The entire AMD Radeon user base supports AVX2, so x86-64-v3 is a safe
+# baseline. For local development, temporarily switch to target-cpu=native
+# to gain additional SIMD benefits.
+[target.'cfg(all(target_arch = "x86_64", target_os = "windows"))']
+rustflags = ["-C", "target-cpu=x86-64-v3"]
